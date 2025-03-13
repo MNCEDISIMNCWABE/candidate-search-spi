@@ -65,16 +65,17 @@ def search_employees_one_row_per_employee_dedup(
 ):
     """
     Search employees by:
-      - 'query' (e.g. 'CEO', 'CEO OR CFO', etc.)
+      - 'query' (e.g. 'CEO OR CFO', etc.)
       - Optional filters: country, location, company, university, industry, skills, certifications, and languages.
-
+      
     In the final DataFrame (one row per employee):
       - Keeps: ID, Name, Headline/Title, Location, Country, URL, Canonical_URL, Industry,
                Experience Count, Summary.
       - Includes: deduplicated Experiences, Educations, Skills, Certifications, Languages, and Projects.
     """
     must_clauses = []
-    # Use query_string for the job title search so boolean logic works
+    
+    # Job title: using query_string for explicit Boolean operators
     must_clauses.append({
         "nested": {
             "path": "member_experience_collection",
@@ -88,89 +89,112 @@ def search_employees_one_row_per_employee_dedup(
         }
     })
     
-    # Use match queries for flexible partial matching
+    # Company Name
     if company_filter:
         must_clauses.append({
             "nested": {
                 "path": "member_experience_collection",
                 "query": {
-                    "match": {
-                        "member_experience_collection.company_name": company_filter
+                    "query_string": {
+                        "query": company_filter,
+                        "default_field": "member_experience_collection.company_name",
+                        "default_operator": "or"
                     }
                 }
             }
         })
 
+    # University Name
     if university_filter:
         must_clauses.append({
             "nested": {
                 "path": "member_education_collection",
                 "query": {
-                    "match": {
-                        "member_education_collection.title": university_filter
+                    "query_string": {
+                        "query": university_filter,
+                        "default_field": "member_education_collection.title",
+                        "default_operator": "or"
                     }
                 }
             }
         })
 
+    # Industry
     if industry_filter:
         must_clauses.append({
-            "match": {
-                "industry": industry_filter
+            "query_string": {
+                "query": industry_filter,
+                "default_field": "industry",
+                "default_operator": "or"
             }
         })
 
+    # Skills
     if skills_filter:
         must_clauses.append({
             "nested": {
                 "path": "member_skills_collection",
                 "query": {
-                    "match": {
-                        "member_skills_collection.member_skill_list.skill": skills_filter
+                    "query_string": {
+                        "query": skills_filter,
+                        "default_field": "member_skills_collection.member_skill_list.skill",
+                        "default_operator": "or"
                     }
                 }
             }
         })
 
+    # Certifications
     if certifications_filter:
         must_clauses.append({
             "nested": {
                 "path": "member_certifications_collection",
                 "query": {
-                    "match": {
-                        "member_certifications_collection.name": certifications_filter
+                    "query_string": {
+                        "query": certifications_filter,
+                        "default_field": "member_certifications_collection.name",
+                        "default_operator": "or"
                     }
                 }
             }
         })
 
+    # Languages
     if languages_filter:
         must_clauses.append({
             "nested": {
                 "path": "member_languages_collection",
                 "query": {
-                    "match": {
-                        "member_languages_collection.member_language_list.language": languages_filter.lower()
+                    "query_string": {
+                        "query": languages_filter.lower(),
+                        "default_field": "member_languages_collection.member_language_list.language",
+                        "default_operator": "or"
                     }
                 }
             }
         })
 
+    # Location
     if location_filter:
         must_clauses.append({
-            "match": {
-                "location": location_filter
+            "query_string": {
+                "query": location_filter,
+                "default_field": "location",
+                "default_operator": "or"
             }
         })
 
+    # Country
     if country_filter:
-        # If country values are standardized, you can still use term here or use match if needed.
         must_clauses.append({
-            "match": {
-                "country": country_filter
+            "query_string": {
+                "query": country_filter,
+                "default_field": "country",
+                "default_operator": "or"
             }
         })
 
+    # Exclude patterns in titles
     exclude_patterns = ["PA to", "Assistant to", "Personal Assistant", "EA to", "Executive Assistant to", "CFO Designate", "CEO Designate"]
     must_not_clauses = [
         {
@@ -313,6 +337,7 @@ def search_employees_one_row_per_employee_dedup(
 
     df = pd.DataFrame(rows)
     return df
+
 
 
 # Ranking functions
