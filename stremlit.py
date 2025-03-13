@@ -73,8 +73,8 @@ def search_employees_one_row_per_employee_dedup(
                Experience Count, Summary.
       - Includes: deduplicated Experiences, Educations, Skills, Certifications, Languages, and Projects.
     """
-    # Build the list of must clauses.
     must_clauses = []
+    # Use query_string for the job title search so boolean logic works
     must_clauses.append({
         "nested": {
             "path": "member_experience_collection",
@@ -87,13 +87,14 @@ def search_employees_one_row_per_employee_dedup(
             }
         }
     })
-
+    
+    # Use match queries for flexible partial matching
     if company_filter:
         must_clauses.append({
             "nested": {
                 "path": "member_experience_collection",
                 "query": {
-                    "match_phrase": {
+                    "match": {
                         "member_experience_collection.company_name": company_filter
                     }
                 }
@@ -105,7 +106,7 @@ def search_employees_one_row_per_employee_dedup(
             "nested": {
                 "path": "member_education_collection",
                 "query": {
-                    "match_phrase": {
+                    "match": {
                         "member_education_collection.title": university_filter
                     }
                 }
@@ -114,7 +115,7 @@ def search_employees_one_row_per_employee_dedup(
 
     if industry_filter:
         must_clauses.append({
-            "match_phrase": {
+            "match": {
                 "industry": industry_filter
             }
         })
@@ -124,7 +125,7 @@ def search_employees_one_row_per_employee_dedup(
             "nested": {
                 "path": "member_skills_collection",
                 "query": {
-                    "match_phrase": {
+                    "match": {
                         "member_skills_collection.member_skill_list.skill": skills_filter
                     }
                 }
@@ -136,7 +137,7 @@ def search_employees_one_row_per_employee_dedup(
             "nested": {
                 "path": "member_certifications_collection",
                 "query": {
-                    "match_phrase": {
+                    "match": {
                         "member_certifications_collection.name": certifications_filter
                     }
                 }
@@ -148,10 +149,25 @@ def search_employees_one_row_per_employee_dedup(
             "nested": {
                 "path": "member_languages_collection",
                 "query": {
-                    "match_phrase": {
+                    "match": {
                         "member_languages_collection.member_language_list.language": languages_filter.lower()
                     }
                 }
+            }
+        })
+
+    if location_filter:
+        must_clauses.append({
+            "match": {
+                "location": location_filter
+            }
+        })
+
+    if country_filter:
+        # If country values are standardized, you can still use term here or use match if needed.
+        must_clauses.append({
+            "match": {
+                "country": country_filter
             }
         })
 
@@ -179,20 +195,6 @@ def search_employees_one_row_per_employee_dedup(
             }
         }
     }
-
-    if country_filter:
-        payload["query"]["bool"]["must"].append({
-            "term": {
-                "country": country_filter
-            }
-        })
-
-    if location_filter:
-        payload["query"]["bool"]["must"].append({
-            "match_phrase": {
-                "location": location_filter
-            }
-        })
 
     search_url = "https://api.coresignal.com/cdapi/v1/professional_network/employee/search/es_dsl"
     headers = {
@@ -311,6 +313,7 @@ def search_employees_one_row_per_employee_dedup(
 
     df = pd.DataFrame(rows)
     return df
+
 
 # Ranking functions
 def build_user_text(row, text_columns: List[str]) -> str:
@@ -616,7 +619,7 @@ def main():
                 languages_filter = st.text_input("Languages", placeholder="e.g. English")
             slider_col, btn_col = st.columns([2, 1])
             with slider_col:
-                max_results = st.slider("Maximum number of results", 1, 2000, 15)
+                max_results = st.slider("Maximum number of results", 1, 600, 15)
             with btn_col:
                 st.write("")
                 st.write("")
@@ -765,13 +768,13 @@ def main():
     st.markdown("---")
     st.markdown("""
     **How to use this application:**
-    1. Enter a job title/position query in the search box (use OR for multiple terms)
+    1. Enter a job title and optionally other parameters in the search boxes (use OR for multiple terms)
     2. Use advanced filters to narrow down candidates
     3. Click "Search Candidates" to find matching profiles
     4. Enter a detailed job description to match candidates against
     5. Click "Rank Candidates" to sort by relevance to the job description
     6. View detailed rankings in the "Ranked Results" tab
-    7. Download the ranked candidates as an Excel file using the download button
+    7. Download the ranked candidates as an Excel file using the download button in the "Ranked Results" tab
     """)
 
 if __name__ == "__main__":
