@@ -223,8 +223,8 @@ def search_employees_one_row_per_employee_dedup(
     search_url = "https://api.coresignal.com/cdapi/v1/professional_network/employee/search/es_dsl"
     headers = {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer eyJhbGciOiJFZERTQSIsImtpZCI6IjMzNjEyYzA1LWQ2MDYtYzllYy0zNGVjLWRiYmJiNGI0ZjgyMCJ9.eyJhdWQiOiJtdWx0aWNob2ljZS5jby56YSIsImV4cCI6MTc3MzQwNjg1OCwiaWF0IjoxNzQxODQ5OTA2LCJpc3MiOiJodHRwczovL29wcy5jb3Jlc2lnbmFsLmNvbTo4MzAwL3YxL2lkZW50aXR5L29pZGMiLCJuYW1lc3BhY2UiOiJyb290IiwicHJlZmVycmVkX3VzZXJuYW1lIjoibXVsdGljaG9pY2UuY28uemEiLCJzdWIiOiI5Nzg4ZDg5Ni0yNzBjLTU4NjgtMTY0Mi05MWFiZDk0MGEwODYiLCJ1c2VyaW5mbyI6eyJzY29wZXMiOiJjZGFwaSJ9fQ.GFaoIY_j8e3TKs9-iQ0H6O7NVz87T3Z7ZWIWPRHo17IrWqmehNvvJ8sD3BMaDVatHs9rr9C3hpUykkwS53HrAw'
-    }    
+    'Authorization': 'Bearer eyJhbGciOiJFZERTQSIsImtpZCI6IjYzOGY5Y2YyLTUyM2UtOGJmMC0zZmFlLTEyY2UwNTUzOTQ1YiJ9.eyJhdWQiOiJzdHVkZW50LnVqLmFjLnphIiwiZXhwIjoxNzczMjc2NTkzLCJpYXQiOjE3NDE3MTk2NDEsImlzcyI6Imh0dHBzOi8vb3BzLmNvcmVzaWduYWwuY29tOjgzMDAvdjEvaWRlbnRpdHkvb2lkYyIsIm5hbWVzcGFjZSI6InJvb3QiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzdHVkZW50LnVqLmFjLnphIiwic3ViIjoiOTc4OGQ4OTYtMjcwYy01ODY4LTE2NDItOTFhYmQ5NDBhMDg2IiwidXNlcmluZm8iOnsic2NvcGVzIjoiY2RhcGkifX0.GYI_XfOwh_DiuBMu9q_JRL39v4bOgJixOWIxPG0ZujADWVFtQQKO1tNJ71ig-ncoRJJE7R6z0WbG4Bxjs_qkDw'
+    }
     resp = requests.post(search_url, headers=headers, json=payload)
     resp.raise_for_status()
     employee_ids = resp.json()
@@ -484,24 +484,39 @@ def to_excel(df):
     return processed_data
 
 # Login management functions
+# Update the login page function to handle email or username login
 def login_page():
     st.title("SPI Executive Search")
     login_tab, signup_tab = st.tabs(["Login", "Sign Up"])
     
     with login_tab:
-        username = st.text_input("Username", key="login_username")
+        username_or_email = st.text_input("Username or Email", key="login_username_email")
         password = st.text_input("Password", type="password", key="login_password")
         
         if st.button("Login"):
             users = load_users()
-            if username in users and check_password(users[username]['password'], password):
+            # Check if the input matches any username directly
+            if username_or_email in users and check_password(users[username_or_email]['password'], password):
                 st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.user_role = users[username].get('role', 'user')
-                st.success(f"Welcome back, {username}!")
+                st.session_state.username = username_or_email
+                st.session_state.user_role = users[username_or_email].get('role', 'user')
+                st.success(f"Welcome back, {username_or_email}!")
                 st.rerun()
             else:
-                st.error("Invalid username or password")
+                # If not found by username, search by email
+                found = False
+                for username, user_data in users.items():
+                    if user_data.get('email') == username_or_email and check_password(user_data['password'], password):
+                        st.session_state.logged_in = True
+                        st.session_state.username = username
+                        st.session_state.user_role = user_data.get('role', 'user')
+                        st.success(f"Welcome back, {username}!")
+                        found = True
+                        st.rerun()
+                        break
+                
+                if not found:
+                    st.error("Invalid username/email or password")
     
     with signup_tab:
         if st.session_state.get('user_role') == 'admin' or not os.path.exists('users.pkl'):
@@ -512,12 +527,18 @@ def login_page():
             
             if st.button("Sign Up"):
                 users = load_users()
+                # Check if username already exists
                 if new_username in users:
                     st.error("Username already exists")
+                # Check if email already exists
+                elif any(user_data.get('email') == email for user_data in users.values()):
+                    st.error("Email already in use")
                 elif new_password != confirm_password:
                     st.error("Passwords do not match")
                 elif not new_username or not new_password:
                     st.error("Username and password cannot be empty")
+                elif not email:
+                    st.error("Email cannot be empty")
                 else:
                     users[new_username] = {
                         'password': make_hashed_password(new_password),
@@ -529,7 +550,6 @@ def login_page():
                     st.success("Account created successfully! You can now login.")
         else:
             st.info("User registration is only managed by administrators. Please contact your administrator for access.")
-
 def logout():
     if st.sidebar.button("Logout"):
         for key in ['logged_in', 'username', 'user_role']:
