@@ -224,7 +224,7 @@ def search_employees_one_row_per_employee_dedup(
     headers = {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer eyJhbGciOiJFZERTQSIsImtpZCI6IjMzNjEyYzA1LWQ2MDYtYzllYy0zNGVjLWRiYmJiNGI0ZjgyMCJ9.eyJhdWQiOiJtdWx0aWNob2ljZS5jby56YSIsImV4cCI6MTc3MzQwNjg1OCwiaWF0IjoxNzQxODQ5OTA2LCJpc3MiOiJodHRwczovL29wcy5jb3Jlc2lnbmFsLmNvbTo4MzAwL3YxL2lkZW50aXR5L29pZGMiLCJuYW1lc3BhY2UiOiJyb290IiwicHJlZmVycmVkX3VzZXJuYW1lIjoibXVsdGljaG9pY2UuY28uemEiLCJzdWIiOiI5Nzg4ZDg5Ni0yNzBjLTU4NjgtMTY0Mi05MWFiZDk0MGEwODYiLCJ1c2VyaW5mbyI6eyJzY29wZXMiOiJjZGFwaSJ9fQ.GFaoIY_j8e3TKs9-iQ0H6O7NVz87T3Z7ZWIWPRHo17IrWqmehNvvJ8sD3BMaDVatHs9rr9C3hpUykkwS53HrAw'
-    }
+    }    
     resp = requests.post(search_url, headers=headers, json=payload)
     resp.raise_for_status()
     employee_ids = resp.json()
@@ -528,7 +528,7 @@ def login_page():
                     save_users(users)
                     st.success("Account created successfully! You can now login.")
         else:
-            st.info("User registration is currently managed by administrators.")
+            st.info("User registration is only managed by administrators. Please contact your administrator for access.")
 
 def logout():
     if st.sidebar.button("Logout"):
