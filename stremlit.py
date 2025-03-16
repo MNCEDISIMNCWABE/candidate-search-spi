@@ -460,6 +460,7 @@ def rank_candidates_semantic(
 
         logger.info("Sorting candidates by similarity score...")
         df_sorted = df.sort_values(by='similarity_score', ascending=False).reset_index(drop=True)
+        df_sorted = df_sorted.drop('combined_text',axis=1)
         
         logger.info(f"Top candidate score: {df_sorted.iloc[0]['similarity_score']:.3f}")
         logger.info("Ranking process completed successfully")
@@ -484,10 +485,9 @@ def to_excel(df):
     return processed_data
 
 # Login management functions
-# Update the login page function to handle email or username login
 def login_page():
     st.title("SPI Executive Search")
-    login_tab, signup_tab = st.tabs(["Login", "Sign Up"])
+    login_tab, signup_tab, forgot_tab = st.tabs(["Login", "Sign Up", "Forgot Password"])
     
     with login_tab:
         username_or_email = st.text_input("Username or Email", key="login_username_email")
@@ -550,6 +550,39 @@ def login_page():
                     st.success("Account created successfully! You can now login.")
         else:
             st.info("User registration is only managed by administrators. Please contact your administrator for access.")
+    with forgot_tab:
+        st.subheader("Reset Password")
+        username_or_email = st.text_input("Enter your username or email", key="reset_username_email")
+        new_password = st.text_input("New Password", type="password", key="reset_new_password")
+        confirm_password = st.text_input("Confirm New Password", type="password", key="reset_confirm_password")
+        
+        if st.button("Reset Password", key="reset_password_button"):
+            users = load_users()
+            user_found = False
+            username = None
+            
+            # Check if the input is a username
+            if username_or_email in users:
+                username = username_or_email
+                user_found = True
+            else:
+                # Check if the input is an email
+                for u, data in users.items():
+                    if data.get('email', '').lower() == username_or_email.lower():
+                        username = u
+                        user_found = True
+                        break
+            
+            if not user_found:
+                st.error("No account found with the provided username or email.")
+            elif new_password != confirm_password:
+                st.error("New passwords do not match. Please try again.")
+            else:
+                # Update the password
+                users[username]['password'] = make_hashed_password(new_password)
+                save_users(users)
+                st.success("Password has been reset successfully. You can now login with your new password.")    
+
 def logout():
     if st.sidebar.button("Logout"):
         for key in ['logged_in', 'username', 'user_role']:
