@@ -51,6 +51,20 @@ def load_users():
         return users
 
 # API functions
+import pandas as pd
+import numpy as np
+import requests
+import logging
+import warnings
+import re
+import os
+
+
+# Set up logging and ignore warnings
+warnings.filterwarnings("ignore")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def search_employees_one_row_per_employee_dedup(
     query,
     country_filter=None,
@@ -65,144 +79,135 @@ def search_employees_one_row_per_employee_dedup(
 ):
     """
     Search employees by:
-      - 'query' (e.g. 'CEO OR CFO', etc.)
-      - Optional filters: country, location, company, university, industry, skills, certifications, and languages.
-      
+      - 'query' (e.g. 'CEO', 'CEO OR CFO', etc.)
+      - Optional filters:
+            country_filter (e.g. 'South Africa'),
+            location_filter (e.g. 'Johannesburg, Gauteng, South Africa'),
+            company_filter (search in company names),
+            university_filter (search in university names),
+            industry_filter (search in the top-level industry field),
+            skills_filter (search in skills),
+            certifications_filter (search in certifications),
+            languages_filter (search in languages),
+            projects_filter (provided for consistency but not used in the search query).
+
     In the final DataFrame (one row per employee):
       - Keeps: ID, Name, Headline/Title, Location, Country, URL, Canonical_URL, Industry,
                Experience Count, Summary.
-      - Includes: deduplicated Experiences, Educations, Skills, Certifications, Languages, and Projects.
+      - Includes: deduplicated Experiences (with duration), Educations, Skills, Certifications,
+                  Languages, and Projects.
     """
+    # Build the list of must clauses.
     must_clauses = []
-    
-    # Job title: using query_string for explicit Boolean operators
+
+    # Base clause: search in experience title
     must_clauses.append({
         "nested": {
-            "path": "member_experience_collection",
+            "path": "experience",
             "query": {
                 "query_string": {
                     "query": query,
-                    "default_field": "member_experience_collection.title",
+                    "default_field": "experience.position_title",
                     "default_operator": "and"
                 }
             }
         }
     })
-    
-    # Company Name
+
+    # Additional filter: Company Name (in experience)
     if company_filter:
         must_clauses.append({
             "nested": {
-                "path": "member_experience_collection",
+                "path": "experience",
                 "query": {
                     "query_string": {
                         "query": company_filter,
-                        "default_field": "member_experience_collection.company_name",
+                        "default_field": "experience.company_name",
                         "default_operator": "or"
                     }
                 }
             }
         })
 
-    # University Name
+    # Additional filter: University Name (in education)
     if university_filter:
         must_clauses.append({
             "nested": {
-                "path": "member_education_collection",
+                "path": "education",
                 "query": {
                     "query_string": {
                         "query": university_filter,
-                        "default_field": "member_education_collection.title",
+                        "default_field": "education.institution_name",
                         "default_operator": "or"
                     }
                 }
             }
         })
 
-    # Industry
+    # Additional filter: Industry (in experience)
     if industry_filter:
         must_clauses.append({
+            "nested": {
+                "path": "experience",
+                "query": {
+                    "query_string": {
+                        "query": industry_filter,
+                        "default_field": "experience.company_industry",
+                        "default_operator": "or"
+                    }
+                }
+            }
+        })
+
+    # Additional filter: Skills (in inferred_skills)
+    if skills_filter:
+        must_clauses.append({
             "query_string": {
-                "query": industry_filter,
-                "default_field": "industry",
+                "query": skills_filter,
+                "default_field": "inferred_skills",
                 "default_operator": "or"
             }
         })
 
-    # Skills
-    if skills_filter:
-        must_clauses.append({
-            "nested": {
-                "path": "member_skills_collection",
-                "query": {
-                    "query_string": {
-                        "query": skills_filter,
-                        "default_field": "member_skills_collection.member_skill_list.skill",
-                        "default_operator": "or"
-                    }
-                }
-            }
-        })
-
-    # Certifications
+    # Additional filter: Certifications
     if certifications_filter:
         must_clauses.append({
             "nested": {
-                "path": "member_certifications_collection",
+                "path": "certifications",
                 "query": {
                     "query_string": {
                         "query": certifications_filter,
-                        "default_field": "member_certifications_collection.name",
+                        "default_field": "certifications.title",
                         "default_operator": "or"
                     }
                 }
             }
         })
 
-    # Languages
+    # Additional filter: Languages
     if languages_filter:
         must_clauses.append({
             "nested": {
-                "path": "member_languages_collection",
+                "path": "languages",
                 "query": {
                     "query_string": {
                         "query": languages_filter.lower(),
-                        "default_field": "member_languages_collection.member_language_list.language",
+                        "default_field": "languages.language",
                         "default_operator": "or"
                     }
                 }
-            }
-        })
-
-    # Location
-    if location_filter:
-        must_clauses.append({
-            "query_string": {
-                "query": location_filter,
-                "default_field": "location",
-                "default_operator": "or"
-            }
-        })
-
-    # Country
-    if country_filter:
-        must_clauses.append({
-            "query_string": {
-                "query": country_filter,
-                "default_field": "country",
-                "default_operator": "or"
             }
         })
 
     # Exclude patterns in titles
-    exclude_patterns = ["PA to", "Assistant to", "Personal Assistant", "EA to", "Executive Assistant to", "CFO Designate", "CEO Designate"]
+    exclude_patterns = ["PA to", "Assistant to", "Personal Assistant", "EA to", "Executive Assistant to","Head of the Office of the CFO","Head of the Office of the CEO"]
     must_not_clauses = [
         {
             "nested": {
-                "path": "member_experience_collection",
+                "path": "experience",
                 "query": {
                     "query_string": {
-                        "query": f"member_experience_collection.title:({pattern})",
+                        "query": f"experience.position_title:({pattern})",
                         "default_operator": "or"
                     }
                 }
@@ -211,6 +216,7 @@ def search_employees_one_row_per_employee_dedup(
         for pattern in exclude_patterns
     ]
 
+    # Build the complete payload with country and location filters added.
     payload = {
         "query": {
             "bool": {
@@ -220,11 +226,34 @@ def search_employees_one_row_per_employee_dedup(
         }
     }
 
-    search_url = "https://api.coresignal.com/cdapi/v1/professional_network/employee/search/es_dsl"
+    if country_filter:
+        payload["query"]["bool"]["must"].append({
+            "query_string": {
+                "query": country_filter,
+                "default_field": "location_country",
+                "default_operator": "and"
+            }
+        })
+
+    if location_filter:
+        payload["query"]["bool"]["must"].append({
+            "query_string": {
+                "query": location_filter,
+                "default_field": "location_full",
+                "default_operator": "and"
+            }
+        })
+
+    # Uncomment for debugging:
+    # print(json.dumps(payload, indent=2))
+
+    # Send the search request.
+    search_url = "https://api.coresignal.com/cdapi/v1/multi_source/employee/search/es_dsl"
     headers = {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer eyJhbGciOiJFZERTQSIsImtpZCI6IjYzOGY5Y2YyLTUyM2UtOGJmMC0zZmFlLTEyY2UwNTUzOTQ1YiJ9.eyJhdWQiOiJzdHVkZW50LnVqLmFjLnphIiwiZXhwIjoxNzczMjc2NTkzLCJpYXQiOjE3NDE3MTk2NDEsImlzcyI6Imh0dHBzOi8vb3BzLmNvcmVzaWduYWwuY29tOjgzMDAvdjEvaWRlbnRpdHkvb2lkYyIsIm5hbWVzcGFjZSI6InJvb3QiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzdHVkZW50LnVqLmFjLnphIiwic3ViIjoiOTc4OGQ4OTYtMjcwYy01ODY4LTE2NDItOTFhYmQ5NDBhMDg2IiwidXNlcmluZm8iOnsic2NvcGVzIjoiY2RhcGkifX0.GYI_XfOwh_DiuBMu9q_JRL39v4bOgJixOWIxPG0ZujADWVFtQQKO1tNJ71ig-ncoRJJE7R6z0WbG4Bxjs_qkDw'
+    'Authorization': 'Bearer eyJhbGciOiJFZERTQSIsImtpZCI6IjMzNjEyYzA1LWQ2MDYtYzllYy0zNGVjLWRiYmJiNGI0ZjgyMCJ9.eyJhdWQiOiJtdWx0aWNob2ljZS5jby56YSIsImV4cCI6MTc3MzQwNjg1OCwiaWF0IjoxNzQxODQ5OTA2LCJpc3MiOiJodHRwczovL29wcy5jb3Jlc2lnbmFsLmNvbTo4MzAwL3YxL2lkZW50aXR5L29pZGMiLCJuYW1lc3BhY2UiOiJyb290IiwicHJlZmVycmVkX3VzZXJuYW1lIjoibXVsdGljaG9pY2UuY28uemEiLCJzdWIiOiI5Nzg4ZDg5Ni0yNzBjLTU4NjgtMTY0Mi05MWFiZDk0MGEwODYiLCJ1c2VyaW5mbyI6eyJzY29wZXMiOiJjZGFwaSJ9fQ.GFaoIY_j8e3TKs9-iQ0H6O7NVz87T3Z7ZWIWPRHo17IrWqmehNvvJ8sD3BMaDVatHs9rr9C3hpUykkwS53HrAw' 
     }
+
     resp = requests.post(search_url, headers=headers, json=payload)
     resp.raise_for_status()
     employee_ids = resp.json()
@@ -233,30 +262,43 @@ def search_employees_one_row_per_employee_dedup(
         print("Unexpected structure in search response.")
         return pd.DataFrame()
 
+    # Collect data for each employee ID.
     rows = []
     for emp_id in employee_ids[:max_to_fetch]:
-        collect_url = f"https://api.coresignal.com/cdapi/v1/professional_network/employee/collect/{emp_id}"
+        
+        collect_url = f"https://api.coresignal.com/cdapi/v1/multi_source/employee/collect/{emp_id}"
         r = requests.get(collect_url, headers=headers)
         r.raise_for_status()
         employee = r.json()
 
+        # Basic fields
         id_val = employee.get("id")
-        name_val = employee.get("name")
-        headline_val = employee.get("title")
-        location_val = employee.get("location")
-        country_val = employee.get("country")
-        url_val = employee.get("url")
-        canonical_url = employee.get("canonical_url")
-        industry_val = employee.get("industry")
-        experience_count_val = employee.get("experience_count")
+        name_val = employee.get("full_name")
+        headline_val = employee.get("headline")
+        location_val = employee.get("location_full")
+        country_val = employee.get("location_country")
+        url_val = employee.get("linkedin_url")
+        canonical_url = employee.get("linkedin_url")  # Using LinkedIn URL as canonical
+        industry_val = None  # Not available in top level, will need to be extracted from experience
+        experience_count_val = len(employee.get("experience", []))
         summary_val = employee.get("summary")
+        
+        # Get email information
+        primary_email = employee.get("primary_professional_email")
+        
+        # Get all email addresses from collection
+        email_collection = employee.get("professional_emails_collection", [])
+        all_emails = [email_info.get("professional_email") for email_info in email_collection if email_info.get("professional_email")]
+        all_emails_str = ", ".join(all_emails) if all_emails else ""
 
-        raw_exps = employee.get("member_experience_collection", [])
+        # ----- EXPERIENCE (deduplicate) -----
+        raw_exps = employee.get("experience", [])
         unique_exps = []
         seen_exps = set()
+        company_industries = set()  # Set to collect unique industries
         for exp in raw_exps:
             key = (
-                exp.get("title", "N/A"),
+                exp.get("position_title", "N/A"),
                 exp.get("company_name", "N/A"),
                 exp.get("date_from", "N/A"),
                 exp.get("date_to", "N/A")
@@ -264,57 +306,99 @@ def search_employees_one_row_per_employee_dedup(
             if key not in seen_exps:
                 seen_exps.add(key)
                 unique_exps.append(exp)
+                # Add industry to the set if it exists
+                if exp.get("company_industry"):
+                    company_industries.add(exp.get("company_industry"))
+
         experiences_str = "\n".join(
-            f"Role: {exp.get('title','N/A')} | Company: {exp.get('company_name','N/A')} | From: {exp.get('date_from','N/A')} | To: {exp.get('date_to','N/A')} | Duration: {exp.get('duration','N/A')}"
+            f"Role: {exp.get('position_title','N/A')} | Company: {exp.get('company_name','N/A')} | From: {exp.get('date_from','N/A')} | To: {exp.get('date_to','N/A')} | Duration: {exp.get('duration_months','N/A')} months"
             for exp in unique_exps
         )
 
-        raw_edu = employee.get("member_education_collection", [])
+        # Create a formatted string of industries
+        company_industry_str = " | ".join(sorted(company_industries)) if company_industries else "N/A"
+
+        # ----- EDUCATION (deduplicate) -----
+        raw_edu = employee.get("education", [])
         unique_edu = []
         seen_edu = set()
         for edu in raw_edu:
             key = (
-                edu.get("title", "N/A"),
-                edu.get("subtitle", "N/A"),
-                edu.get("date_from", "N/A"),
-                edu.get("date_to", "N/A")
+                edu.get("institution_name", "N/A"),
+                edu.get("degree", "N/A"),
+                str(edu.get("date_from_year", "N/A")),
+                str(edu.get("date_to_year", "N/A"))
             )
             if key not in seen_edu:
                 seen_edu.add(key)
                 unique_edu.append(edu)
         educations_str = "\n".join(
-            f"Institution: {edu.get('title','N/A')} | Degree: {edu.get('subtitle','N/A')} | From: {edu.get('date_from','N/A')} | To: {edu.get('date_to','N/A')}"
+            f"Institution: {edu.get('institution_name','N/A')} | Degree: {edu.get('degree','N/A')} | From: {edu.get('date_from_year','N/A')} | To: {edu.get('date_to_year','N/A')}"
             for edu in unique_edu
         )
 
-        raw_skills = employee.get("member_skills_collection", [])
-        seen_skills = set()
-        for skill_entry in raw_skills:
-            skill_name = skill_entry.get("member_skill_list", {}).get("skill", "N/A")
-            seen_skills.add(skill_name)
-        skills_str = ", ".join(seen_skills) if seen_skills else ""
+        # ----- SKILLS (deduplicate) -----
+        skills = employee.get("inferred_skills", [])
+        skills_str = ", ".join(skills) if skills else ""
 
-        raw_certifications = employee.get("member_certifications_collection", [])
+        # ----- CERTIFICATIONS (deduplicate) -----
+        raw_certifications = employee.get("certifications", [])
         seen_certs = set()
         for cert in raw_certifications:
-            cert_name = cert.get("name", "N/A")
+            cert_name = cert.get("title", "N/A")
             seen_certs.add(cert_name)
         certifications_str = ", ".join(seen_certs) if seen_certs else ""
 
-        raw_languages = employee.get("member_languages_collection", [])
+        # ----- LANGUAGES (deduplicate) -----
+        raw_languages = employee.get("languages", [])
         seen_langs = set()
         for lang in raw_languages:
-            language_name = lang.get("member_language_list", {}).get("language", "N/A")
+            language_name = lang.get("language", "N/A")
             seen_langs.add(language_name)
         languages_str = ", ".join(seen_langs) if seen_langs else ""
 
-        raw_projects = employee.get("member_projects_collection", [])
+        # ----- PROJECTS (deduplicate) -----
+        raw_projects = employee.get("projects", [])
         seen_projects = set()
         for proj in raw_projects:
             proj_name = proj.get("name", "N/A")
             seen_projects.add(proj_name)
         projects_str = ", ".join([str(x) for x in seen_projects if x is not None]) if seen_projects else ""
 
+        # ----- AWARDS (deduplicate) -----
+        raw_awards = employee.get("awards", [])
+        seen_awards = set()
+        for award in raw_awards:
+            award_name = award.get("title", "N/A")
+            seen_awards.add(award_name)
+        awards_str = ", ".join(seen_awards) if seen_awards else ""
+
+        # ----- PATENTS (deduplicate) -----
+        raw_patents = employee.get("patents", [])
+        seen_patents = set()
+        for patent in raw_patents:
+            patent_name = patent.get("title", "N/A")
+            seen_patents.add(patent_name)
+        patents_str = ", ".join(seen_patents) if seen_patents else ""
+
+        # ----- PUBLICATIONS (deduplicate) -----
+        raw_publications = employee.get("publications", [])
+        seen_publications = set()
+        for pub in raw_publications:
+            pub_name = pub.get("title", "N/A")
+            seen_publications.add(pub_name)
+        publications_str = ", ".join(seen_publications) if seen_publications else ""
+
+        # ----- SALARY INFORMATION -----
+        projected_base_salary_median = employee.get("projected_base_salary_median")
+        projected_base_salary_currency = employee.get("projected_base_salary_currency")
+        projected_base_salary_period = employee.get("projected_base_salary_period")
+        
+        salary_str = ""
+        if projected_base_salary_median:
+            salary_str = f"{projected_base_salary_currency}{projected_base_salary_median:,.2f} {projected_base_salary_period}"
+
+        # Build the final row dictionary.
         row = {
             "ID": id_val,
             "Name": name_val,
@@ -322,8 +406,9 @@ def search_employees_one_row_per_employee_dedup(
             "Location": location_val,
             "Country": country_val,
             "URL": url_val,
-            "Canonical_URL": canonical_url,
-            "Industry": industry_val,
+            "Primary Email": primary_email,
+            "All Emails": all_emails_str,
+            "Industry": company_industry_str, 
             "Experience Count": experience_count_val,
             "Summary": summary_val,
             "Experiences": experiences_str,
@@ -331,14 +416,13 @@ def search_employees_one_row_per_employee_dedup(
             "Skills": skills_str,
             "Certifications": certifications_str,
             "Languages": languages_str,
-            "Projects": projects_str
         }
         rows.append(row)
 
+    # After the search API call
     df = pd.DataFrame(rows)
+
     return df
-
-
 
 # Ranking functions
 def build_user_text(row, text_columns: List[str]) -> str:
@@ -402,7 +486,7 @@ def rank_candidates_semantic(
         if text_columns is None:
             text_columns = [
                 'Summary', 'Experiences', 'Educations', 'Headline/Title',
-                'Industry', 'Skills', 'Certifications', 'Projects'
+                'Industry', 'Skills', 'Certifications'
             ]
             logger.debug(f"Using default text columns: {text_columns}")
         else:
@@ -461,7 +545,7 @@ def rank_candidates_semantic(
         logger.info("Sorting candidates by similarity score...")
         df_sorted = df.sort_values(by='similarity_score', ascending=False).reset_index(drop=True)
         df_sorted = df_sorted.drop('combined_text',axis=1)
-        
+
         logger.info(f"Top candidate score: {df_sorted.iloc[0]['similarity_score']:.3f}")
         logger.info("Ranking process completed successfully")
         return df_sorted
@@ -697,7 +781,7 @@ def main():
                 languages_filter = st.text_input("Languages", placeholder="e.g. English")
             slider_col, btn_col = st.columns([2, 1])
             with slider_col:
-                max_results = st.slider("Maximum number of results", 1, 600, 15)
+                max_results = st.slider("Maximum number of results", 1, 150, 15)
             with btn_col:
                 st.write("")
                 st.write("")
@@ -788,14 +872,14 @@ def main():
         if st.session_state.ranked_results is not None and not st.session_state.ranked_results.empty:
             export_columns = [
                 'ID', 'Name', 'Headline/Title', 'Location', 'Country', 'URL', 
-                'Industry', 'Experience Count', 'Summary', 'Experiences', 
-                'Educations', 'Skills', 'Certifications', 'Languages', 'combined_text', 'similarity_score'
+                'Primary Email', 'All Emails', 'Industry', 'Experience Count', 'Summary', 'Experiences', 
+                'Educations', 'Skills', 'Certifications', 'Languages', 'similarity_score'
             ]
             export_df = st.session_state.ranked_results[
                 [col for col in export_columns if col in st.session_state.ranked_results.columns]
             ].copy()
             if 'similarity_score' in export_df.columns:
-                export_df['similarity_score'] = export_df['similarity_score'] * 100
+                export_df['similarity_score'] = round(export_df['similarity_score'] * 100, 2)
             excel_data = to_excel(export_df)
             st.download_button(
                 label="📥 Download Ranked Candidates (Excel)",
