@@ -563,7 +563,7 @@ def load_model(model_name='all-MiniLM-L6-v2'):
 def to_excel(df):
     output = io.BytesIO()
     writer = pd.ExcelWriter(output, engine='xlsxwriter')
-    df.to_excel(writer, sheet_name='Ranked Candidates', index=False)
+    df.to_excel(writer, sheet_name='Candidates', index=False)
     writer.close()
     processed_data = output.getvalue()
     return processed_data
@@ -839,6 +839,17 @@ def main():
         
         if st.session_state.search_results is not None and not st.session_state.search_results.empty:
             st.subheader("Search Results")
+            
+            # Add download button for raw search results
+            raw_export_df = st.session_state.search_results.copy()
+            raw_excel_data = to_excel(raw_export_df)
+            st.download_button(
+                label="📥 Download Search Results (Excel)",
+                data=raw_excel_data,
+                file_name='search_results.xlsx',
+                mime='application/vnd.ms-excel',
+                key='raw_download'
+            )
             for i, row in st.session_state.search_results.iterrows():
                 with st.expander(f"{row['Name']} - {row['Headline/Title']}"):
                     col1, col2 = st.columns([1, 2])
@@ -931,12 +942,13 @@ def main():
     st.markdown("""
     **How to use this application:**
     1. Enter a job title and optionally other parameters in the search boxes (use OR for multiple terms)
-    2. Use advanced filters to narrow down candidates
+    2. Use slider to limit the number of results returned
     3. Click "Search Candidates" to find matching profiles
-    4. Enter a detailed job description to match candidates against
-    5. Click "Rank Candidates" to sort by relevance to the job description
-    6. View detailed rankings in the "Ranked Results" tab
-    7. Download the ranked candidates as an Excel file using the download button in the "Ranked Results" tab
+    4. Download the results as an Excel file
+    5. Optionally, enter a job description to match candidates against
+    6. Click "Rank Candidates" to sort candidates by relevance to the job description
+    7. View detailed rankings in the "Ranked Results" tab
+    8. Download the ranked candidates as an Excel file in the "Ranked Results" tab
     """)
 
 if __name__ == "__main__":
